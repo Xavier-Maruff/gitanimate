@@ -1,35 +1,33 @@
 package pkg
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/charmbracelet/log"
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-type PerdurantFile struct {
-	FileName    string
-	PastContent string
-	Diff        *diff.FilePatch
+type CommitFile struct {
+	FileName       string
+	CurrentContent string
+	PrevContent    string
 }
 
 type GitWrap interface {
-	NextFile() (*PerdurantFile, error)
+	GetFiles() ([]*CommitFile, error)
 	PopCommit() (string, error)
 	CurrCommit() string
 }
 
 type GitWrapper struct {
-	commits []*object.Commit
-	idx     int
-	fileIdx int
-	patch   *object.Patch
-	files   map[string]*PerdurantFile
+	Commits []*object.Commit
+	Idx     int
+	Repo    *git.Repository
 }
 
-func NewGitWrapper() (GitWrap, error) {
+func NewGitWrapper() (*GitWrapper, error) {
 	repo, err := git.PlainOpen("/Users/xaviermaruff/forwhy")
 	if err != nil {
 		log.Errorf("Failed to open repository: %v", err)
@@ -51,118 +49,116 @@ func NewGitWrapper() (GitWrap, error) {
 	revCommits := make([]*object.Commit, 0)
 	err = commitIter.ForEach(func(c *object.Commit) error {
 		revCommits = append(revCommits, c)
-
 		return nil
 	})
 
 	if err != nil && err != io.EOF {
-		log.Errorf("Error iterating over commits: %v", err)
+		log.Errorf("Error iterating over Commits: %v", err)
 		return nil, err
 	}
 
 	return &GitWrapper{
-		commits: revCommits,
-		idx:     0,
-		fileIdx: 0,
-		files:   make(map[string]*PerdurantFile),
+		Commits: revCommits,
+		Idx:     0,
+		Repo:    repo,
 	}, nil
 }
 
 func (g *GitWrapper) PopCommit() (string, error) {
-	g.idx++
-	g.fileIdx = 0
-	parents := g.commits[g.idx].Parents()
-	parent, err := parents.Next()
-	if err != nil {
-		if err == object.ErrParentNotFound {
-			return g.commits[g.idx].Hash.String(), nil
-		}
-		return "", err
+	if g.Idx+1 >= len(g.Commits) {
+		return "", fmt.Errorf("no more Commits to pop")
 	}
 
-	g.patch, err = parent.Patch(g.commits[g.idx])
-	if err != nil {
-		return "", err
-	}
-
-	return g.commits[g.idx].Hash.String(), nil
+	g.Idx++
+	return g.Commits[g.Idx].Hash.String(), nil
 }
 
 func (g *GitWrapper) CurrCommit() string {
-	return g.commits[g.idx].Hash.String()
+	if g.Idx >= len(g.Commits) {
+		return ""
+	}
+	return g.Commits[g.Idx].Hash.String()
 }
 
-func (g *GitWrapper) NextFile() (*PerdurantFile, error) {
-	if g.patch == nil {
-		if _, err := g.PopCommit(); err != nil {
-			return nil, err
+func (g *GitWrapper) GetFiles() ([]*CommitFile, error) {
+	if g.Idx >= len(g.Commits) {
+		return nil, fmt.Errorf("commit index out of range")
+	}
+
+	commit := g.Commits[g.Idx]
+
+	parentIter := commit.Parents()
+	parent, err := parentIter.Next()
+	if err != nil {
+		if err == object.ErrParentNotFound {
+			parent = nil
+		} else {
+			return nil, fmt.Errorf("failed to get parent commit: %v", err)
 		}
 	}
 
-	if g.fileIdx >= len(g.patch.FilePatches()) {
-		return nil, nil
-	}
-
-	filePatch := g.patch.FilePatches()[g.fileIdx]
-	_, to := filePatch.Files()
-
-	if to == nil {
-		g.fileIdx++
-		return g.NextFile()
-	}
-
-	fileRef := g.files[to.Path()]
-
-	cont, err := g.commits[g.idx].File(to.Path())
-	if err != nil {
-		return nil, err
-	}
-	contVal, err := cont.Contents()
-	if err != nil {
-		return nil, err
-	}
-
-	if fileRef == nil {
-		fileRef = &PerdurantFile{
-			FileName:    to.Path(),
-			PastContent: contVal,
-			Diff:        &filePatch,
+	var patch *object.Patch
+	if parent != nil {
+		patch, err = parent.Patch(commit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get patch: %v", err)
 		}
-		g.files[to.Path()] = fileRef
-		g.fileIdx++
-
-		return fileRef, nil
+	} else {
+		patch, err = commit.Patch(nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get initial patch: %v", err)
+		}
 	}
 
-	fileRef.PastContent, err = g.applyPatch(fileRef.PastContent, filePatch)
-	if err != nil {
-		return nil, err
-	}
-	fileRef.Diff = &filePatch
-	g.fileIdx++
+	commitFiles := []*CommitFile{}
 
-	return fileRef, nil
-}
+	for _, filePatch := range patch.FilePatches() {
+		from, to := filePatch.Files()
 
-func (g *GitWrapper) applyPatch(content string, patch diff.FilePatch) (string, error) {
-	_, toFile := patch.Files()
-	if toFile == nil {
-		return "", nil
+		var prevContent string
+		var currentContent string
+		var fileName string
+
+		if from != nil {
+			fileName = from.Path()
+			file, err := parent.File(from.Path())
+			if err != nil {
+				prevContent = ""
+			} else {
+				content, err := file.Contents()
+				if err != nil {
+					return nil, fmt.Errorf("failed to get content of file %s from parent: %v", from.Path(), err)
+				}
+				prevContent = content
+			}
+		} else if to != nil {
+			fileName = to.Path()
+			prevContent = ""
+		}
+
+		if to != nil {
+			fileName = to.Path()
+			file, err := commit.File(to.Path())
+			if err != nil {
+				currentContent = ""
+			} else {
+				content, err := file.Contents()
+				if err != nil {
+					return nil, fmt.Errorf("failed to get content of file %s from commit: %v", to.Path(), err)
+				}
+				currentContent = content
+			}
+		} else if from != nil {
+			fileName = from.Path()
+			currentContent = ""
+		}
+
+		commitFiles = append(commitFiles, &CommitFile{
+			FileName:       fileName,
+			CurrentContent: currentContent,
+			PrevContent:    prevContent,
+		})
 	}
 
-	currentCommit := g.commits[g.idx]
-	file, err := currentCommit.File(toFile.Path())
-	if err != nil {
-		return content, err
-	}
-	reader, err := file.Blob.Reader()
-	if err != nil {
-		return content, err
-	}
-	defer reader.Close()
-	newContentBytes, err := io.ReadAll(reader)
-	if err != nil {
-		return content, err
-	}
-	return string(newContentBytes), nil
+	return commitFiles, nil
 }

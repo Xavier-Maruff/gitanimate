@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/Xavier-Maruff/gitanimate/pkg"
 	"github.com/charmbracelet/log"
@@ -18,11 +19,11 @@ var (
 	font       rl.Font
 	style              = styles.Get("catppuccin-mocha")
 	fontSize   float32 = 20
-	lineHeight float32 = fontSize * 1.2 // Adjust as needed
+	lineHeight float32 = fontSize * 1.2
 )
 
 func main() {
-	//rand.Seed(time.Now().UnixNano())
+	rand.Seed(time.Now().UnixNano())
 	raylibMain()
 }
 
@@ -54,13 +55,14 @@ func getColorForTokenType(tokenType chroma.TokenType) rl.Color {
 }
 
 func renderTokens(tokens []chroma.Token, startX, startY float32, typedCharsCount int, cursorVisible bool, scrollOffsetY float32) (float32, float32) {
-	lineNumberWidth := float32(50) // Width reserved for line numbers
+	lineNumberWidth := float32(50)
 	x, y := startX+lineNumberWidth, startY
 	charsRendered := 0
 	var cursorX, cursorY float32 = x, y
 	lineNumber := 1
 
-	// Draw the first line number
+	screenWidth := float32(rl.GetScreenWidth())
+
 	lineNumberStr := fmt.Sprintf("%d", lineNumber)
 	rl.DrawTextEx(font, lineNumberStr, rl.Vector2{X: startX, Y: y - scrollOffsetY}, fontSize, 0, rl.Gray)
 
@@ -76,13 +78,21 @@ func renderTokens(tokens []chroma.Token, startX, startY float32, typedCharsCount
 				x = startX + lineNumberWidth
 				y += lineHeight
 				lineNumber++
-				// Draw the line number
 				lineNumberStr := fmt.Sprintf("%d", lineNumber)
 				rl.DrawTextEx(font, lineNumberStr, rl.Vector2{X: startX, Y: y - scrollOffsetY}, fontSize, 0, rl.Gray)
 			} else {
-				// When drawing, subtract scrollOffsetY from y
+				charWidth := rl.MeasureTextEx(font, charStr, fontSize, 0).X
+
+				if x+charWidth > screenWidth-10 {
+					x = startX + lineNumberWidth
+					y += lineHeight
+					lineNumber++
+					lineNumberStr := fmt.Sprintf("%d", lineNumber)
+					rl.DrawTextEx(font, lineNumberStr, rl.Vector2{X: startX, Y: y - scrollOffsetY}, fontSize, 0, rl.Gray)
+				}
+
 				rl.DrawTextEx(font, charStr, rl.Vector2{X: x, Y: y - scrollOffsetY}, fontSize, 0, color)
-				x += rl.MeasureTextEx(font, charStr, fontSize, 0).X
+				x += charWidth
 			}
 			charsRendered++
 			cursorX = x
@@ -93,7 +103,6 @@ func renderTokens(tokens []chroma.Token, startX, startY float32, typedCharsCount
 		}
 	}
 
-	// Draw cursor at current position if cursorVisible is true
 	if cursorVisible {
 		rl.DrawRectangle(int32(cursorX), int32(cursorY-scrollOffsetY), 2, int32(lineHeight), rl.White)
 	}
@@ -116,35 +125,31 @@ func raylibMain() {
 		log.Fatal(err)
 	}
 
-	code, err := g.NextFile()
-	code, err = g.NextFile()
 	_, err = g.PopCommit()
-	code, err = g.NextFile()
 
+	files, err := g.GetFiles()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	tokens, err := tokenizeCode(lang(code.FileName), code.PastContent)
+	code := files[0]
+
+	tokens, err := tokenizeCode(lang(code.FileName), code.CurrentContent)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Initialize variables for typing animation
 	var typedCharsCount int
 	var cursorVisible bool = true
 	var cursorTimer float32
 	var scrollOffsetY float32
 
-	// Typing simulation variables
 	var nextCharTimer float32
-	var minDelay float32 = 0.0005 // Minimum delay between characters
-	var maxDelay float32 = 0.05   // Maximum delay between characters
+	var minDelay float32 = 0.001
+	var maxDelay float32 = 0.17
 
-	// Set initial delay for first character
 	nextCharTimer = random(minDelay, maxDelay)
 
-	// Calculate total characters in tokens
 	var totalChars int
 	for _, token := range tokens {
 		totalChars += len(token.Value)
@@ -153,14 +158,12 @@ func raylibMain() {
 	for !rl.WindowShouldClose() {
 		deltaTime := rl.GetFrameTime()
 
-		// Update cursor blinking
 		cursorTimer += deltaTime
 		if cursorTimer >= 0.5 {
 			cursorVisible = !cursorVisible
 			cursorTimer = 0
 		}
 
-		// Update typing simulation
 		if typedCharsCount < totalChars {
 			nextCharTimer -= deltaTime
 			if nextCharTimer <= 0 {
@@ -172,16 +175,13 @@ func raylibMain() {
 		rl.BeginDrawing()
 		rl.ClearBackground(bgRl)
 
-		// Render tokens and get cursor position
 		_, cursorY := renderTokens(tokens, 10, 10, typedCharsCount, cursorVisible, scrollOffsetY)
 
 		windowHeight := float32(rl.GetScreenHeight())
 		linesFromBottom := lineHeight * 2
 
-		// Automatic scrolling logic
 		if cursorY-scrollOffsetY+linesFromBottom > windowHeight {
 			scrollOffsetY = cursorY + linesFromBottom - windowHeight
-			scrollOffsetY = scrollOffsetY + 0.05*windowHeight
 		}
 
 		rl.EndDrawing()
