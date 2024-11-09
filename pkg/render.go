@@ -1,6 +1,7 @@
 package gitanimate
 
 import (
+	"embed"
 	"fmt"
 	"math"
 	"math/rand"
@@ -21,6 +22,7 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
 
+	"github.com/schollz/progressbar/v3"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
@@ -41,6 +43,8 @@ type AnimateDiffParams struct {
 	Params         *AnimateParams
 	UpdateProgress func(tea.Msg) (tea.Model, tea.Cmd)
 	ShowWindow     bool
+	Pos            int
+	Total          int
 }
 
 type AnimState struct {
@@ -53,6 +57,8 @@ type AnimState struct {
 }
 
 var (
+	//go:embed assets
+	fonts      embed.FS
 	font       rl.Font
 	style              = styles.Get("catppuccin-mocha")
 	fontSize   float32 = 20
@@ -104,7 +110,8 @@ func tokenizeCode(lang string, code string) ([]chroma.Token, error) {
 
 func loadFont(name string) {
 	if name == "default" {
-		font = rl.GetFontDefault()
+		f, _ := fonts.ReadFile("assets/fonts/HurmitNerdFontMono-Regular.otf")
+		font = rl.LoadFontFromMemory(".otf", f, 120, nil)
 	} else {
 		font = rl.LoadFontEx(name, 120, nil, 0)
 	}
@@ -376,9 +383,19 @@ func AnimateDiff(params *AnimateDiffParams) error {
 	go func() {
 		<-c
 		Logger.Info("Cleaning up temporary files")
-		os.RemoveAll(temp)
+		err := os.RemoveAll(temp)
+		if err != nil {
+			Logger.Errorf("Failed to clean up temporary files: %v", err)
+		}
+
 		os.Exit(1)
 	}()
+
+	bar := progressbar.NewOptions(len(params.Diffs),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionSetWidth(45),
+		progressbar.OptionSetDescription(params.Filename+fmt.Sprintf(" (%d/%d) ", params.Pos, params.Total)),
+	)
 
 	rl.SetTraceLogLevel(rl.LogError)
 	var flags uint32 = rl.FlagVsyncHint | rl.FlagWindowHighdpi
@@ -436,6 +453,8 @@ func AnimateDiff(params *AnimateDiffParams) error {
 		nextCharTimer -= deltaTime
 		if nextCharTimer <= 0 {
 			done = state.incr()
+
+			bar.Set(state.OpIndex)
 
 			tokens, cursorIndex = state.renderTokens()
 			nextCharTimer = float32(math.Exp(float64(random(-100, 0))))*(maxDelay-minDelay) + minDelay
@@ -496,6 +515,8 @@ func AnimateDiff(params *AnimateDiffParams) error {
 		Logger.Fatal(err)
 	}
 
+	bar.Set(len(params.Diffs))
+	bar.Clear()
 	return nil
 }
 

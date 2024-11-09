@@ -34,7 +34,7 @@ func init() {
 	rootCmd.Flags().StringP("end", "e", "", "Commit to end at")
 	rootCmd.Flags().Int32P("max_commits", "m", 0, "Maximum number of commits to process")
 	rootCmd.Flags().BoolP("show", "w", false, "Show the animation as it is created")
-	rootCmd.Flags().Int32P("width", "x", 600, "Width of the output")
+	rootCmd.Flags().Int32P("width", "x", 750, "Width of the output")
 	rootCmd.Flags().Int32P("height", "y", 800, "Height of the output")
 }
 
@@ -74,13 +74,15 @@ func runGitAnimate(cmd *cobra.Command, args []string) {
 		}
 
 		for i, f := range files {
-			gitanimate.Logger.Infof("\t(%d/%d) File: %s", i+1, len(files), f.FileName)
+			//gitanimate.Logger.Infof("\t(%d/%d) File: %s", i+1, len(files), f.FileName)
 
 			diffs := diffmatchpatch.New().DiffMain(f.PrevContent, f.CurrentContent, false)
 			diffs = diffmatchpatch.New().DiffCleanupSemanticLossless(diffs)
 			diffs = diffmatchpatch.New().DiffCleanupMerge(diffs)
 
 			err := gitanimate.AnimateDiff(&gitanimate.AnimateDiffParams{
+				Pos:         i + 1,
+				Total:       len(files),
 				Diffs:       diffs,
 				PrevContent: f.PrevContent,
 				Filename:    f.FileName,
