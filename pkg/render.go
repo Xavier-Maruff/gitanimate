@@ -316,7 +316,7 @@ func (a *AnimState) renderTokens() ([]chroma.Token, int) {
 			if a.CharIndex >= len(a.Diffs[a.OpIndex].Text) {
 				a.CharIndex--
 			}
-			if random(0, 1) > 0.7 {
+			if random(0, 1) > 0.9 {
 				time.Sleep(time.Duration(random(200, 500)) * time.Millisecond)
 			}
 		}
@@ -470,8 +470,8 @@ func AnimateDiff(params *AnimateDiffParams) error {
 			bar.Set(state.OpIndex)
 
 			tokens, cursorIndex = state.renderTokens()
-			nextCharTimer = float32(math.Exp(float64(random(-100, 0))))*(maxDelay-minDelay) + minDelay
-			if nextCharTimer > 0.8*maxDelay {
+			nextCharTimer = float32(math.Exp(float64(random(-10, 0))))*(maxDelay-minDelay) + minDelay
+			if nextCharTimer > 0.9*maxDelay {
 				nextCharTimer = maxDelay
 			} else {
 				nextCharTimer = random(minDelay, nextCharTimer)
