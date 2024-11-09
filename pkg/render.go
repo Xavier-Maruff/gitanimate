@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -454,6 +455,7 @@ func AnimateDiff(params *AnimateDiffParams) error {
 	done := false
 	postDone := 0
 
+	var wg sync.WaitGroup
 	for !rl.WindowShouldClose() {
 		if done {
 			postDone++
@@ -502,12 +504,17 @@ func AnimateDiff(params *AnimateDiffParams) error {
 
 		//rl.ImageFlipVertical(img)
 
-		imgPath := filepath.Join(temp, fmt.Sprintf(FrameFormat, frameCount))
-		if !rl.ExportImage(*img, imgPath) {
+		go func() {
+			wg.Add(1)
+			imgPath := filepath.Join(temp, fmt.Sprintf(FrameFormat, frameCount))
+			if !rl.ExportImage(*img, imgPath) {
+				rl.UnloadImage(img)
+				Logger.Fatal(err)
+			}
 			rl.UnloadImage(img)
-			Logger.Fatal(err)
-		}
-		rl.UnloadImage(img)
+
+			wg.Done()
+		}()
 
 		//add extra frames at end to catch any missed changes
 		if postDone > FrameRate/2 || frameCount > MaxFrameCount {
@@ -518,6 +525,8 @@ func AnimateDiff(params *AnimateDiffParams) error {
 
 		//time.Sleep(time.Second / FrameRate)
 	}
+
+	wg.Wait()
 
 	if err := encodeFramesToVideo(
 		temp, frameCount+10,
