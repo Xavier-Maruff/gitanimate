@@ -410,6 +410,8 @@ func AnimateDiff(params *AnimateDiffParams) error {
 	//defer rl.UnloadRenderTexture(renderTexture)
 
 	rl.SetTargetFPS(FrameRate)
+
+	style = styles.Get(params.Params.Theme)
 	bg := style.Get(chroma.Background)
 	bgRl := rl.Color{R: bg.Background.Red(), G: bg.Background.Green(), B: bg.Background.Blue(), A: 255}
 

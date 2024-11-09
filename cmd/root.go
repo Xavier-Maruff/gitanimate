@@ -27,7 +27,7 @@ func Execute() {
 func init() {
 	rootCmd.Flags().StringP("output", "o", "gitanimate_output", "Path to output directory")
 	rootCmd.Flags().StringP("font", "f", "default", "Font to use")
-	rootCmd.Flags().StringP("theme", "t", "default", "Theme to use")
+	rootCmd.Flags().StringP("theme", "t", "catppuccin-mocha", "Chroma theme used for syntax highlighting")
 	rootCmd.Flags().Float32P("max_delay", "s", 1, "Maximum delay between edits")
 	rootCmd.Flags().Float32P("min_delay", "i", 0.01, "Minimum delay between edits")
 	rootCmd.Flags().StringP("start", "a", "initial", "Commit to start from")
