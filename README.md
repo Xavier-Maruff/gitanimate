@@ -1,4 +1,4 @@
-# gitanimate
+# 🎥 gitanimate
 
 Turn your git history into typing animations. Not very useful, but fun!
 
