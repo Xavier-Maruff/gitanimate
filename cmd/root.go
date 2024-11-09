@@ -44,6 +44,11 @@ func runGitAnimate(cmd *cobra.Command, args []string) {
 		gitanimate.Logger.Infof("Usage: gitanimate <repo_path>")
 	}
 
+	if args[0] == "help" {
+		cmd.Help()
+		return
+	}
+
 	animParams := parseParams(cmd)
 	repoPath := args[0]
 
