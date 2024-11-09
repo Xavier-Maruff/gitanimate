@@ -6,11 +6,13 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/log"
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/reiver/go-whitespace"
@@ -22,12 +24,32 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
+type AnimateParams struct {
+	Output   string
+	Font     string
+	Theme    string
+	MinDelay float32
+	MaxDelay float32
+	Width    int32
+	Height   int32
+}
+
+type AnimateDiffParams struct {
+	Diffs          []diffmatchpatch.Diff
+	PrevContent    string
+	Filename       string
+	Params         *AnimateParams
+	UpdateProgress func(tea.Msg) (tea.Model, tea.Cmd)
+	ShowWindow     bool
+}
+
 type AnimState struct {
-	OpIndex   int
-	CharIndex int
-	Diffs     []diffmatchpatch.Diff
-	Lang      string
-	Filename  string
+	OpIndex        int
+	CharIndex      int
+	Diffs          []diffmatchpatch.Diff
+	Lang           string
+	Filename       string
+	UpdateProgress func(tea.Msg) (tea.Model, tea.Cmd)
 }
 
 var (
@@ -35,20 +57,32 @@ var (
 	style              = styles.Get("catppuccin-mocha")
 	fontSize   float32 = 20
 	lineHeight float32 = fontSize * 1.2
-	logger             = log.NewWithOptions(os.Stderr, log.Options{
-		ReportCaller: true,
-		Prefix:       "[gitanimate]",
+	Logger             = log.NewWithOptions(os.Stderr, log.Options{
+		//ReportCaller: true,
+		//Prefix:       "[gitanimate]",
 	})
+	LangExts = map[string]string{
+		"f90":  "fortran",
+		"f?":   "fortran",
+		"c":    "c",
+		"cpp":  "cpp",
+		"py":   "python",
+		"sh":   "bash",
+		"js":   "javascript",
+		"html": "html",
+		"css":  "css",
+		"java": "java",
+		"rs":   "rust",
+		"go":   "go",
+		"md":   "markdown",
+	}
 )
 
 const (
-	ScreenWidth   = 800
-	ScreenHeight  = 600
 	FrameRate     = 10
-	FFmpegPath    = "ffmpeg" // Ensure FFmpeg is in your PATH
+	FFmpegPath    = "ffmpeg"
 	FFmpegPreset  = "veryslow"
-	MaxFrameCount = 1000     // Optional: limit number of frames
-	TempDir       = "frames" // Temporary directory to store frames
+	MaxFrameCount = 1000
 	FrameFormat   = "frame_%04d.png"
 )
 
@@ -68,8 +102,12 @@ func tokenizeCode(lang string, code string) ([]chroma.Token, error) {
 	return tokens, nil
 }
 
-func loadFonts() {
-	font = rl.LoadFontEx("assets/fonts/HurmitNerdFontMono-Regular.otf", 120, nil, 0)
+func loadFont(name string) {
+	if name == "default" {
+		font = rl.GetFontDefault()
+	} else {
+		font = rl.LoadFontEx(name, 120, nil, 0)
+	}
 }
 
 func getColorForTokenType(tokenType chroma.TokenType) rl.Color {
@@ -188,6 +226,13 @@ func renderTokensAll(tokens []chroma.Token, startX, startY float32, cursorVisibl
 }
 
 func (a *AnimState) incr() bool {
+	updateProgress := func() {
+		if a.UpdateProgress != nil {
+			a.UpdateProgress(float64(a.OpIndex) / float64(len(a.Diffs)))
+		}
+	}
+	defer updateProgress()
+
 	for {
 		if a.OpIndex >= len(a.Diffs)-1 {
 			return true
@@ -239,7 +284,7 @@ func (a *AnimState) renderTokens() ([]chroma.Token, int) {
 	if a.OpIndex >= len(a.Diffs) {
 		tokens, err := tokenizeCode(a.Lang, str)
 		if err != nil {
-			logger.Fatal(err)
+			Logger.Fatal(err)
 		}
 
 		return tokens, len(str)
@@ -289,7 +334,7 @@ func (a *AnimState) renderTokens() ([]chroma.Token, int) {
 			cursorIndex = len(str) - 1
 		}
 
-		if str[cursorIndex] == '\n' {
+		if str[cursorIndex] == "\n"[0] {
 			cursorIndex = max(cursorIndex-1, 0)
 		}
 	case diffmatchpatch.DiffEqual:
@@ -310,24 +355,38 @@ func (a *AnimState) renderTokens() ([]chroma.Token, int) {
 
 	tokens, err := tokenizeCode(a.Lang, str)
 	if err != nil {
-		logger.Fatal(err)
+		Logger.Fatal(err)
 	}
 
 	return tokens, cursorIndex
 }
 
-func AnimateDiff(diffs []diffmatchpatch.Diff, prevContent string, output string, filename string) error {
-	err := os.MkdirAll(output, os.ModePerm)
+func AnimateDiff(params *AnimateDiffParams) error {
+	err := os.MkdirAll(params.Params.Output, os.ModePerm)
 
 	temp, err := os.MkdirTemp("", "gitanimate")
 	if err != nil {
-		logger.Fatal(err)
+		Logger.Fatal(err)
 	}
-
 	defer os.RemoveAll(temp)
 
-	rl.SetConfigFlags(rl.FlagVsyncHint | rl.FlagWindowHighdpi | rl.FlagWindowHidden)
-	rl.InitWindow(ScreenWidth, ScreenHeight, "gitanimate")
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+
+	go func() {
+		<-c
+		Logger.Info("Cleaning up temporary files")
+		os.RemoveAll(temp)
+		os.Exit(1)
+	}()
+
+	rl.SetTraceLogLevel(rl.LogError)
+	var flags uint32 = rl.FlagVsyncHint | rl.FlagWindowHighdpi
+	if !params.ShowWindow {
+		flags |= rl.FlagWindowHidden
+	}
+	rl.SetConfigFlags(flags)
+	rl.InitWindow(params.Params.Width, params.Params.Height, "gitanimate")
 	defer rl.CloseWindow()
 
 	//renderTexture := rl.LoadRenderTexture(ScreenWidth, ScreenHeight)
@@ -337,27 +396,28 @@ func AnimateDiff(diffs []diffmatchpatch.Diff, prevContent string, output string,
 	bg := style.Get(chroma.Background)
 	bgRl := rl.Color{R: bg.Background.Red(), G: bg.Background.Green(), B: bg.Background.Blue(), A: 255}
 
-	loadFonts()
+	loadFont(params.Params.Font)
 
 	var scrollOffsetY float32
 
 	var nextCharTimer float32
-	var minDelay float32 = 0.01
-	var maxDelay float32 = 1
+	var minDelay float32 = params.Params.MinDelay
+	var maxDelay float32 = params.Params.MaxDelay
 
 	nextCharTimer = random(minDelay, maxDelay)
 
-	tokens, err := tokenizeCode(lang(filename), prevContent)
+	tokens, err := tokenizeCode(lang(params.Filename), params.PrevContent)
 	if err != nil {
-		logger.Fatal(err)
+		Logger.Fatal(err)
 	}
 
 	state := AnimState{
-		OpIndex:   0,
-		CharIndex: 0,
-		Diffs:     diffs,
-		Lang:      lang(filename),
-		Filename:  filename,
+		OpIndex:        0,
+		CharIndex:      0,
+		Diffs:          params.Diffs,
+		Lang:           lang(params.Filename),
+		Filename:       params.Filename,
+		UpdateProgress: params.UpdateProgress,
 	}
 
 	cursorIndex := 0
@@ -365,6 +425,7 @@ func AnimateDiff(diffs []diffmatchpatch.Diff, prevContent string, output string,
 
 	done := false
 	postDone := 0
+
 	for !rl.WindowShouldClose() {
 		if done {
 			postDone++
@@ -406,7 +467,7 @@ func AnimateDiff(diffs []diffmatchpatch.Diff, prevContent string, output string,
 		img := rl.LoadImageFromScreen()
 		//img := rl.LoadImageFromTexture(renderTexture.Texture)
 		if img == nil {
-			logger.Fatal("Failed to load image from screen")
+			Logger.Fatal("Failed to load image from screen")
 		}
 
 		//rl.ImageFlipVertical(img)
@@ -414,7 +475,7 @@ func AnimateDiff(diffs []diffmatchpatch.Diff, prevContent string, output string,
 		imgPath := filepath.Join(temp, fmt.Sprintf(FrameFormat, frameCount))
 		if !rl.ExportImage(*img, imgPath) {
 			rl.UnloadImage(img)
-			logger.Fatal(err)
+			Logger.Fatal(err)
 		}
 		rl.UnloadImage(img)
 
@@ -430,9 +491,9 @@ func AnimateDiff(diffs []diffmatchpatch.Diff, prevContent string, output string,
 
 	if err := encodeFramesToVideo(
 		temp, frameCount+10,
-		path.Join(output, strings.ReplaceAll(filename, "/", "_"))+".mp4",
+		path.Join(params.Params.Output, strings.ReplaceAll(params.Filename, "/", "_"))+".mp4",
 	); err != nil {
-		logger.Fatal(err)
+		Logger.Fatal(err)
 	}
 
 	return nil
@@ -457,10 +518,10 @@ func encodeFramesToVideo(temp string, frameCount int, output string) error {
 		output,
 	)
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	//cmd.Stdout = os.Stdout
+	//cmd.Stderr = os.Stderr
 
-	logger.Info("Starting FFmpeg encoding...")
+	//Logger.Debug("Starting FFmpeg encoding...")
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("FFmpeg error: %v", err)
@@ -474,20 +535,12 @@ func lang(filename string) string {
 	if len(parts) < 2 {
 		return "text"
 	}
-	ext := parts[len(parts)-1]
-	switch ext {
-	case "go", "f?":
-		return "go"
-	case "md":
-		return "markdown"
-	case "f90", "f95":
-		return "fortran"
-	case "c":
-		return "c"
-	default:
-		logger.Warnf("Unknown language for file: %s", filename)
+	ret := LangExts[parts[len(parts)-1]]
+	if ret == "" {
 		return "text"
 	}
+
+	return ret
 }
 
 func random(min, max float32) float32 {

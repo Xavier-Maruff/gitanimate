@@ -27,8 +27,8 @@ type GitWrapper struct {
 	Repo    *git.Repository
 }
 
-func NewGitWrapper() (*GitWrapper, error) {
-	repo, err := git.PlainOpen("/Users/xaviermaruff/forwhy")
+func NewGitWrapper(repoPath, start, end string) (*GitWrapper, error) {
+	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		log.Errorf("Failed to open repository: %v", err)
 		return nil, err
@@ -47,8 +47,25 @@ func NewGitWrapper() (*GitWrapper, error) {
 	}
 
 	revCommits := make([]*object.Commit, 0)
+
+	startAppend := false
+
+	//weird because we iterate from HEAD to start
 	err = commitIter.ForEach(func(c *object.Commit) error {
-		revCommits = append(revCommits, c)
+		if (c.Hash.String() == end || end == "") && !startAppend {
+			//Logger.Infof("Found end commit: %s", c.Hash.String())
+			startAppend = true
+		}
+
+		if startAppend {
+			revCommits = append(revCommits, c)
+		}
+
+		if c.Hash.String() == start {
+			//Logger.Infof("Found start commit: %s", c.Hash.String())
+			return io.EOF
+		}
+
 		return nil
 	})
 
