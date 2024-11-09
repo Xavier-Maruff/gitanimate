@@ -28,8 +28,9 @@ func init() {
 	rootCmd.Flags().StringP("output", "o", "gitanimate_output", "Path to output directory")
 	rootCmd.Flags().StringP("font", "f", "default", "Font to use")
 	rootCmd.Flags().StringP("theme", "t", "catppuccin-mocha", "Chroma theme used for syntax highlighting")
-	rootCmd.Flags().Float32P("max_delay", "s", 1, "Maximum delay between edits")
+	rootCmd.Flags().Float32P("max_delay", "s", 0.5, "Maximum delay between edits")
 	rootCmd.Flags().Float32P("min_delay", "i", 0.01, "Minimum delay between edits")
+	rootCmd.Flags().BoolP("disable_random", "r", false, "Disable delay randomisation between edits")
 	rootCmd.Flags().StringP("start", "a", "initial", "Commit to start from")
 	rootCmd.Flags().StringP("end", "e", "", "Commit to end at")
 	rootCmd.Flags().Int32P("max_commits", "m", 0, "Maximum number of commits to process")
@@ -116,14 +117,16 @@ func parseParams(cmd *cobra.Command) *gitanimate.AnimateParams {
 	maxDelay, _ := cmd.Flags().GetFloat32("max_delay")
 	width, _ := cmd.Flags().GetInt32("width")
 	height, _ := cmd.Flags().GetInt32("height")
+	disableRandom, _ := cmd.Flags().GetBool("disable_random")
 
 	return &gitanimate.AnimateParams{
-		Output:   outputDir,
-		Font:     font,
-		Theme:    theme,
-		MinDelay: minDelay,
-		MaxDelay: maxDelay,
-		Width:    width,
-		Height:   height,
+		Output:        outputDir,
+		Font:          font,
+		Theme:         theme,
+		MinDelay:      minDelay,
+		MaxDelay:      maxDelay,
+		Width:         width,
+		Height:        height,
+		DisableRandom: disableRandom,
 	}
 }

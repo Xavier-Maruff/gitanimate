@@ -28,13 +28,14 @@ import (
 )
 
 type AnimateParams struct {
-	Output   string
-	Font     string
-	Theme    string
-	MinDelay float32
-	MaxDelay float32
-	Width    int32
-	Height   int32
+	Output        string
+	Font          string
+	Theme         string
+	MinDelay      float32
+	MaxDelay      float32
+	Width         int32
+	Height        int32
+	DisableRandom bool
 }
 
 type AnimateDiffParams struct {
@@ -133,62 +134,6 @@ func getColorForTokenType(tokenType chroma.TokenType) rl.Color {
 	return rl.Color{R: color.Red(), G: color.Green(), B: color.Blue(), A: 255}
 }
 
-func renderTokens(tokens []chroma.Token, startX, startY float32, typedCharsCount int, cursorVisible bool, scrollOffsetY float32) (float32, float32) {
-	lineNumberWidth := float32(50)
-	x, y := startX+lineNumberWidth, startY
-	charsRendered := 0
-	var cursorX, cursorY float32 = x, y
-	lineNumber := 1
-
-	screenWidth := float32(rl.GetScreenWidth())
-
-	lineNumberStr := fmt.Sprintf("%d", lineNumber)
-	rl.DrawTextEx(font, lineNumberStr, rl.Vector2{X: startX, Y: y - scrollOffsetY}, fontSize, 0, rl.Gray)
-
-	for _, token := range tokens {
-		color := getColorForTokenType(token.Type)
-		text := token.Value
-		for _, char := range text {
-			if charsRendered >= typedCharsCount {
-				break
-			}
-			charStr := string(char)
-			if char == '\n' {
-				x = startX + lineNumberWidth
-				y += lineHeight
-				lineNumber++
-				lineNumberStr := fmt.Sprintf("%d", lineNumber)
-				rl.DrawTextEx(font, lineNumberStr, rl.Vector2{X: startX, Y: y - scrollOffsetY}, fontSize, 0, rl.Gray)
-			} else {
-				charWidth := rl.MeasureTextEx(font, charStr, fontSize, 0).X
-
-				if x+charWidth > screenWidth-10 {
-					x = startX + lineNumberWidth
-					y += lineHeight
-					lineNumber++
-					lineNumberStr := fmt.Sprintf("%d", lineNumber)
-					rl.DrawTextEx(font, lineNumberStr, rl.Vector2{X: startX, Y: y - scrollOffsetY}, fontSize, 0, rl.Gray)
-				}
-
-				rl.DrawTextEx(font, charStr, rl.Vector2{X: x, Y: y - scrollOffsetY}, fontSize, 0, color)
-				x += charWidth
-			}
-			charsRendered++
-			cursorX = x
-			cursorY = y
-		}
-		if charsRendered >= typedCharsCount {
-			break
-		}
-	}
-
-	if cursorVisible {
-		rl.DrawRectangle(int32(cursorX), int32(cursorY-scrollOffsetY), 2, int32(lineHeight), rl.White)
-	}
-
-	return cursorX, cursorY
-}
-
 func renderTokensAll(tokens []chroma.Token, startX, startY float32, cursorVisible bool, scrollOffsetY float32, cursorIndex int) (float32, float32) {
 	lineNumberWidth := float32(50)
 	x, y := startX+lineNumberWidth, startY
@@ -281,7 +226,7 @@ func (a *AnimState) incr() bool {
 	return false
 }
 
-func (a *AnimState) renderTokens() ([]chroma.Token, int) {
+func (a *AnimState) renderTokens(disableRandom bool) ([]chroma.Token, int) {
 	if a.OpIndex >= len(a.Diffs) {
 		a.OpIndex = len(a.Diffs) - 1
 	}
@@ -316,7 +261,7 @@ func (a *AnimState) renderTokens() ([]chroma.Token, int) {
 			if a.CharIndex >= len(a.Diffs[a.OpIndex].Text) {
 				a.CharIndex--
 			}
-			if random(0, 1) > 0.9 {
+			if random(0, 1) > 0.9 && !disableRandom {
 				time.Sleep(time.Duration(random(200, 500)) * time.Millisecond)
 			}
 		}
@@ -469,15 +414,18 @@ func AnimateDiff(params *AnimateDiffParams) error {
 
 			bar.Set(state.OpIndex)
 
-			tokens, cursorIndex = state.renderTokens()
-			nextCharTimer = float32(math.Exp(float64(random(-10, 0))))*(maxDelay-minDelay) + minDelay
-			if nextCharTimer > 0.9*maxDelay {
-				nextCharTimer = maxDelay
+			tokens, cursorIndex = state.renderTokens(params.Params.DisableRandom)
+			if params.Params.DisableRandom {
+				nextCharTimer = minDelay
 			} else {
-				nextCharTimer = random(minDelay, nextCharTimer)
+				nextCharTimer =
+					float32(math.Exp(float64(random(-10, 0))))*(maxDelay-minDelay) +
+						minDelay
+				if nextCharTimer > 0.9*maxDelay {
+					nextCharTimer = maxDelay
+				}
 			}
 
-			//nextCharTimer = random(minDelay, maxDelay)
 		}
 
 		rl.BeginDrawing()
