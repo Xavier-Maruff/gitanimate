@@ -110,10 +110,19 @@ func tokenizeCode(lang string, code string) ([]chroma.Token, error) {
 
 func loadFont(name string) {
 	if name == "default" {
-		f, _ := fonts.ReadFile("assets/fonts/HurmitNerdFontMono-Regular.otf")
+		f, err := fonts.ReadFile("assets/fonts/IBMPlexMono-Regular.ttf")
+		if err != nil {
+			Logger.Errorf("Failed to load font: %s", err)
+			font = rl.GetFontDefault()
+		}
+
 		font = rl.LoadFontFromMemory(".otf", f, 120, nil)
 	} else {
 		font = rl.LoadFontEx(name, 120, nil, 0)
+		if font.Texture.ID == rl.GetFontDefault().Texture.ID {
+			Logger.Errorf("Failed to load font %s, defaulting to IBM Plex Mono", name)
+			loadFont("default")
+		}
 	}
 }
 
